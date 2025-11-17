@@ -6,7 +6,7 @@ import { zhTW } from 'date-fns/locale';
 import { PlusIcon, GroupIcon, XIcon } from './ui/Icons';
 import Button from './ui/Button';
 import AddTaskModal from './modals/AddTaskModal';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useNotifications } from '../hooks/useNotifications';
 
 interface CalendarViewProps {
     project: Project;
