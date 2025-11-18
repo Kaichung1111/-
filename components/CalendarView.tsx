@@ -305,6 +305,14 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate })
     return (
         <div className="relative">
             <h2 className="text-2xl font-bold mb-4 text-gray-700 no-print">月曆檢視</h2>
+            
+            {/* Global Print Header: Visible only in print, repeated by browser on each page because it's fixed */}
+            <div className="hidden print-week-header grid-cols-7">
+                {WEEK_DAYS.map(day => (
+                    <div key={day} className="text-center font-bold text-sm py-2 text-black border-b-2 border-black">{day}</div>
+                ))}
+            </div>
+
             <div className="space-y-8">
                 {months.map(month => (
                     <MonthGrid
@@ -403,7 +411,7 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
     return (
         <div className="bg-white p-4 rounded-lg shadow print-container">
             <h3 className="text-xl font-semibold text-center mb-4">{format(month, 'yyyy年 MMMM', { locale: zhTW })}</h3>
-            <div className="grid grid-cols-7 border-t border-l border-gray-200">
+            <div className="grid grid-cols-7 border-t border-l border-gray-200 no-print-local-header">
                 {WEEK_DAYS.map(day => (
                     <div key={day} className="text-center font-medium text-sm py-2 bg-gray-50 border-r border-b border-gray-200">{day}</div>
                 ))}
@@ -456,7 +464,7 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
                                             return (
                                                 <div
                                                     key={task.id}
-                                                    className={`relative rounded px-2 text-white text-sm font-medium pointer-events-auto group flex items-start py-0.5 transition-all duration-100 ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                                                    className={`relative rounded px-2 text-white text-sm font-medium pointer-events-auto group flex items-start py-0.5 transition-all duration-100 task-bar ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
                                                     onClick={(e) => onTaskClick(task.id, e)}
                                                     onMouseDown={(e) => { if (!isEditing) onTaskDragStart(task, 'move', e); }}
                                                     onDoubleClick={(e) => { e.stopPropagation(); onEditStart(task); }}

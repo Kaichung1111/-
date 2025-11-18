@@ -24,11 +24,19 @@
       }
 
       @media print {
-        body {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-          background-color: #fff !important;
+        @page {
+          size: A4 landscape;
+          margin: 8mm;
         }
+
+        body {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          background-color: #fff !important;
+          /* Auto-fit scale: slightly shrink content to ensure it fits width comfortably */
+          zoom: 0.9; 
+        }
+
         /* Hide elements not meant for printing. The 'no-print' class is added to them. */
         .no-print, header {
           display: none !important;
@@ -40,41 +48,65 @@
             min-height: initial !important;
             overflow: visible !important;
         }
-        .flex.flex-col {
-            display: block !important;
+        
+        /* Global Fixed Header for Print (appears on every page) */
+        .print-week-header {
+            display: grid !important;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: white;
+            z-index: 9999;
+            border-bottom: 2px solid #000;
+            margin-bottom: 10px;
+            padding-left: 1rem; /* Match MonthGrid padding */
+            padding-right: 1rem;
+        }
+
+        /* Hide the local headers inside the months during print to avoid duplication/clutter */
+        .no-print-local-header {
+            display: none !important;
         }
 
         main {
           padding: 0 !important;
           overflow: visible !important;
           height: auto !important;
+          margin-top: 40px !important; /* Add space for the fixed header */
         }
 
+        /* Optimize Month Container */
         .print-container {
           box-shadow: none !important;
-          border: 1px solid #ccc;
-          page-break-inside: avoid;
+          border: none !important; /* Remove border to save space */
+          page-break-inside: auto;
+          padding-top: 0 !important;
         }
 
         /* Ensure tasks are readable */
         .text-white {
             color: black !important;
+            text-shadow: none !important;
+        }
+        
+        /* Improve task visibility contrast in print */
+        .task-bar {
+            border: 1px solid #ccc;
         }
 
-        /* Ensure week rows have a minimum height */
+        /* Ensure week rows have a minimum height and don't break mid-row */
         .task-week-grid {
-            min-height: 80px;
+            min-height: 60px;
+            break-inside: avoid;
+            page-break-inside: avoid;
+            border-bottom: 1px solid #eee;
         }
 
         /* Remove selection highlight which is irrelevant for print */
         .ring-2 {
             --tw-ring-shadow: 0 0 #0000 !important;
             box-shadow: none !important;
-        }
-
-        @page {
-          size: A4 landscape;
-          margin: 1cm;
         }
       }
     </style>
