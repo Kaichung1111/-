@@ -5,7 +5,7 @@ import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import { useNotifications } from '../../hooks/useNotifications';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 
 interface AddTaskModalProps {
   onClose: () => void;
@@ -26,7 +26,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ onClose, onAddTask, initial
         addNotification('任務名稱不能為空', 'error');
         return;
     }
-    if (parseISO(startDate) > parseISO(endDate)) {
+    if (startDate > endDate) {
         addNotification('結束日期不能早於開始日期', 'error');
         return;
     }

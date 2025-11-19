@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Project, ViewMode, Task } from '../types';
+import { Project, ViewMode, Task, FilterType } from '../types';
 import { useProjects } from '../hooks/useProjects';
-import { ArrowLeftIcon, CogIcon, DownloadIcon, PrinterIcon, UploadIcon, CalendarIcon, GroupIcon, LockClosedIcon, LockOpenIcon } from './ui/Icons';
+import { ArrowLeftIcon, CogIcon, DownloadIcon, PrinterIcon, UploadIcon, CalendarIcon, GroupIcon, LockClosedIcon, LockOpenIcon, FilterIcon } from './ui/Icons';
 import CalendarView from './CalendarView';
 import GroupRelationshipView from './GroupRelationshipView';
 import Button from './ui/Button';
@@ -24,6 +24,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
     const [viewMode, setViewMode] = useState<ViewMode>('calendar');
     const [isUnitsModalOpen, setIsUnitsModalOpen] = useState(false);
     const [isLocked, setIsLocked] = useState(false);
+    const [filter, setFilter] = useState<FilterType>({ type: 'all', value: null });
     const { addNotification } = useNotifications();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,7 +72,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         if (!files || !project) return;
     
         const newTasks: Task[] = [];
-        const unitNameMap = new Map(project.units.map(u => [u.name, u.id]));
+        const unitNameMap = new Map<string, string>(project.units.map(u => [u.name, u.id] as [string, string]));
     
         const parseMD = (content: string, fileName: string): Omit<Task, 'id'> | null => {
             const parts = content.split('---');
@@ -113,13 +114,12 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         };
     
         let importedCount = 0;
-        // FIX: Explicitly typed the 'file' parameter as 'File' to prevent TypeScript from inferring it as 'unknown', which would cause an error when accessing 'file.name'.
         const filePromises = Array.from(files).map((file: File) => {
             return new Promise<void>((resolve, reject) => {
                  if (file.name.endsWith('.md')) {
                     const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const content = e.target?.result;
+                    reader.onload = () => {
+                        const content = reader.result;
                         if (typeof content === 'string') {
                             const parsedTask = parseMD(content, file.name);
                             if (parsedTask) {
@@ -161,6 +161,17 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         addNotification(isLocked ? '已解除編輯鎖定' : '已鎖定專案，禁止編輯', 'info');
     };
 
+    const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const value = e.target.value;
+        if (value === 'all') {
+            setFilter({ type: 'all', value: null });
+        } else if (value.startsWith('unit:')) {
+            setFilter({ type: 'unit', value: value.replace('unit:', '') });
+        } else if (value.startsWith('group:')) {
+            setFilter({ type: 'group', value: value.replace('group:', '') });
+        }
+    };
+
     if (loading) {
         return <div className="flex h-screen items-center justify-center">
             <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
@@ -179,7 +190,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
 
     return (
         <div className="flex flex-col h-screen bg-gray-100">
-            <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 p-3 flex items-center justify-between sticky top-0 z-30 no-print">
+            <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 p-3 flex items-center justify-between sticky top-0 z-50 no-print">
                 <div className="flex items-center gap-4">
                     <Button onClick={onExit} variant="ghost" size="sm">
                         <ArrowLeftIcon className="w-5 h-5" />
@@ -190,8 +201,33 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
                         {project.tasks.length} 個任務
                     </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-4">
                      <SegmentedControl options={viewOptions} value={viewMode} onChange={(val) => setViewMode(val as ViewMode)} />
+                     
+                     {viewMode === 'calendar' && (
+                        <div className="flex items-center gap-2 border-l pl-4 border-gray-300">
+                            <FilterIcon className="w-5 h-5 text-gray-500" />
+                            <select 
+                                onChange={handleFilterChange} 
+                                className="border-gray-300 rounded-md shadow-sm text-sm py-1.5 pl-3 pr-8 focus:border-blue-500 focus:ring-blue-500 bg-white text-gray-800"
+                                value={filter.type === 'all' ? 'all' : `${filter.type}:${filter.value}`}
+                            >
+                                <option value="all">顯示全部任務</option>
+                                <optgroup label="依執行單位">
+                                    {project.units.map(unit => (
+                                        <option key={unit.id} value={`unit:${unit.id}`}>{unit.name}</option>
+                                    ))}
+                                </optgroup>
+                                {project.groups.length > 0 && (
+                                    <optgroup label="依任務群組">
+                                        {project.groups.map(group => (
+                                            <option key={group.id} value={`group:${group.id}`}>{group.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </div>
+                     )}
                 </div>
                 <div className="flex items-center gap-2">
                     <Button 
@@ -230,18 +266,10 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
             </header>
 
             <main className="flex-grow overflow-auto p-4">
-                {project.tasks.length === 0 ? (
-                    <div className="text-center py-20">
-                        <h2 className="text-2xl font-semibold text-gray-700">歡迎來到您的新專案！</h2>
-                        <p className="text-gray-500 mt-2">開始新增任務來建立您的排程吧。</p>
-                        {/* The Add Task button is now in the CalendarView, but we could add one here too */}
-                    </div>
-                ) : (
-                    <>
-                        {viewMode === 'calendar' && <CalendarView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} />}
-                        {viewMode === 'group' && <GroupRelationshipView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} />}
-                    </>
-                )}
+                <>
+                    {viewMode === 'calendar' && <CalendarView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} filter={filter} />}
+                    {viewMode === 'group' && <GroupRelationshipView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} />}
+                </>
             </main>
 
             {isUnitsModalOpen && !isLocked && (

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Project, Task, TaskGroup } from '../types';
-import { parseISO, format, differenceInDays } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
 import { TrashIcon, EditIcon } from './ui/Icons';
 import Button from './ui/Button';
 
@@ -10,6 +10,14 @@ interface GroupRelationshipViewProps {
     onProjectUpdate: (updatedProject: Project) => void;
     isLocked: boolean;
 }
+
+const parseISO = (str: string) => {
+    if (str.length === 10) {
+        const [y, m, d] = str.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    return new Date(str);
+};
 
 const GroupRelationshipView: React.FC<GroupRelationshipViewProps> = ({ project, onProjectUpdate, isLocked }) => {
     
@@ -127,9 +135,6 @@ const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete, onUnli
                             {index < groupTasks.length - 1 && (
                                 <div className="flex items-center my-1 ml-3.5">
                                     <div className="w-px h-6 bg-gray-300"></div>
-                                    <div className="ml-4 text-xs text-gray-600 bg-gray-200 px-2 py-0.5 rounded-full cursor-pointer hover:bg-gray-300">
-                                        間隔 {group.intervals[index] || 0} 天
-                                    </div>
                                 </div>
                             )}
                         </div>
@@ -137,7 +142,7 @@ const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete, onUnli
                 </div>
             </div>
         </div>
-    )
-}
+    );
+};
 
 export default GroupRelationshipView;

@@ -1,17 +1,17 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Project, Task, TaskGroup } from '../types';
-import { addDays, differenceInDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isToday, parseISO } from 'date-fns';
-import { zhTW } from 'date-fns/locale';
+import { Project, Task, TaskGroup, FilterType } from '../types';
+import { addDays, differenceInDays, endOfWeek, eachWeekOfInterval, format, isToday, getYear, getMonth } from 'date-fns';
 import { PlusIcon, GroupIcon, XIcon, LinkIcon } from './ui/Icons';
 import Button from './ui/Button';
 import AddTaskModal from './modals/AddTaskModal';
-import { useNotifications } from '../hooks/useNotifications';
+import { useNotifications } from '../../hooks/useNotifications';
 
 interface CalendarViewProps {
     project: Project;
     onProjectUpdate: (updatedProject: Project) => void;
     isLocked: boolean;
+    filter: FilterType;
 }
 
 interface DragState {
@@ -23,7 +23,6 @@ interface DragState {
     weekHeight: number;
     taskInitialStartDate: Date;
     taskInitialEndDate: Date;
-    // For group dragging: store initial state of all related tasks
     relatedTasks: {
         id: string;
         initialStart: Date;
@@ -33,9 +32,33 @@ interface DragState {
 
 const WEEK_DAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-const arrangeTasksInLanes = (tasks: Task[]) => {
+const parseISO = (str: string) => {
+    if (str.length === 10) {
+        const [y, m, d] = str.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    return new Date(str);
+};
+
+const startOfWeek = (date: Date, options?: any) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    d.setDate(d.getDate() - day);
+    d.setHours(0, 0, 0, 0);
+    return d;
+};
+
+const arrangeTasksInLanes = (tasks: Task[], weekStart: Date) => {
     const lanes: Task[][] = [];
-    const sortedTasks = [...tasks].sort((a, b) => {
+    // Filter tasks that overlap with this week
+    const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
+    const weekTasks = tasks.filter(task => {
+        const taskStart = parseISO(task.startDate);
+        const taskEnd = parseISO(task.endDate);
+        return Math.max(taskStart.getTime(), weekStart.getTime()) <= Math.min(taskEnd.getTime(), weekEnd.getTime());
+    });
+
+    const sortedTasks = [...weekTasks].sort((a, b) => {
         const diff = differenceInDays(parseISO(a.startDate), parseISO(b.startDate));
         if (diff !== 0) return diff;
         return differenceInDays(parseISO(b.endDate), parseISO(a.endDate));
@@ -51,7 +74,14 @@ const arrangeTasksInLanes = (tasks: Task[]) => {
             const hasOverlap = lane.some(existingTask => {
                 const existingStart = parseISO(existingTask.startDate);
                 const existingEnd = parseISO(existingTask.endDate);
-                return Math.max(taskStart.getTime(), existingStart.getTime()) <= Math.min(taskEnd.getTime(), existingEnd.getTime());
+                // Check for overlap specifically within the week context for visual lanes
+                // We care about the intersection with the week
+                const tStart = Math.max(taskStart.getTime(), weekStart.getTime());
+                const tEnd = Math.min(taskEnd.getTime(), weekEnd.getTime());
+                const eStart = Math.max(existingStart.getTime(), weekStart.getTime());
+                const eEnd = Math.min(existingEnd.getTime(), weekEnd.getTime());
+                
+                return tStart <= eEnd && tEnd >= eStart;
             });
 
             if (!hasOverlap) {
@@ -67,8 +97,7 @@ const arrangeTasksInLanes = (tasks: Task[]) => {
     return lanes;
 };
 
-
-const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, isLocked }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, isLocked, filter }) => {
     const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
     const [modalDates, setModalDates] = useState<{ start: Date, end: Date } | null>(null);
     const [dragState, setDragState] = useState<DragState | null>(null);
@@ -79,10 +108,19 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
     const [editingTaskName, setEditingTaskName] = useState('');
     const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
     
-    // Ref to distinguish between click and drag
     const ignoreClickRef = useRef(false);
 
     const displayProject = tempProject || project;
+
+    const filteredTasks = useMemo(() => {
+        let tasks = displayProject.tasks;
+        if (filter.type === 'unit' && filter.value) {
+            tasks = tasks.filter(t => t.unitId === filter.value);
+        } else if (filter.type === 'group' && filter.value) {
+            tasks = tasks.filter(t => t.groupId === filter.value);
+        }
+        return tasks;
+    }, [displayProject.tasks, filter]);
 
     const unitColorMap = useMemo(() => {
         return displayProject.units.reduce((acc, unit) => {
@@ -91,29 +129,47 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         }, {} as Record<string, string>);
     }, [displayProject.units]);
 
-    const months = useMemo(() => {
+    const weekRange = useMemo(() => {
         if (!displayProject.startDate || !displayProject.endDate) return [];
+        
         const projectStart = parseISO(displayProject.startDate);
         const projectEnd = parseISO(displayProject.endDate);
 
-        const minDate = displayProject.tasks.length > 0
-            ? new Date(Math.min(projectStart.getTime(), ...displayProject.tasks.map(t => parseISO(t.startDate).getTime())))
-            : projectStart;
-        const maxDate = displayProject.tasks.length > 0
-            ? new Date(Math.max(projectEnd.getTime(), ...displayProject.tasks.map(t => parseISO(t.endDate).getTime())))
-            : projectEnd;
-        
-        const monthsInRange: Date[] = [];
-        let currentMonth = startOfMonth(minDate);
-        while (currentMonth <= maxDate) {
-            monthsInRange.push(currentMonth);
-            currentMonth = addDays(endOfMonth(currentMonth), 1);
+        // Determine effective range including all tasks
+        let minDate = projectStart;
+        let maxDate = projectEnd;
+
+        if (displayProject.tasks.length > 0) {
+            const taskStarts = displayProject.tasks.map(t => parseISO(t.startDate).getTime());
+            const taskEnds = displayProject.tasks.map(t => parseISO(t.endDate).getTime());
+            minDate = new Date(Math.min(projectStart.getTime(), ...taskStarts));
+            maxDate = new Date(Math.max(projectEnd.getTime(), ...taskEnds));
         }
-        if (monthsInRange.length === 0) {
-            monthsInRange.push(startOfMonth(new Date()));
-        }
-        return monthsInRange;
-    }, [displayProject.tasks, displayProject.startDate, displayProject.endDate]);
+
+        const start = startOfWeek(minDate, { weekStartsOn: 0 });
+        const end = endOfWeek(maxDate, { weekStartsOn: 0 });
+
+        return eachWeekOfInterval({ start, end }, { weekStartsOn: 0 });
+    }, [displayProject.startDate, displayProject.endDate, displayProject.tasks]);
+
+    const monthGroups = useMemo(() => {
+        const groups: { id: string; year: number; month: number; weeks: Date[] }[] = [];
+        weekRange.forEach(weekStart => {
+            // Determine the month by looking at the majority of days or Thursday
+            const thursday = addDays(weekStart, 3);
+            const year = getYear(thursday);
+            const month = getMonth(thursday);
+            const id = `${year}-${month}`;
+
+            let group = groups.find(g => g.id === id);
+            if (!group) {
+                group = { id, year, month, weeks: [] };
+                groups.push(group);
+            }
+            group.weeks.push(weekStart);
+        });
+        return groups;
+    }, [weekRange]);
 
     const handleAddTask = (task: Omit<Task, 'id' | 'unitId'>) => {
         const newTask: Task = {
@@ -135,10 +191,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
     const handleTaskDragStart = useCallback((taskProp: Task, type: DragState['type'], e: React.MouseEvent) => {
         if (isLocked) return;
         e.stopPropagation();
-        
-        // Reset the click ignore flag on mouse down
         ignoreClickRef.current = false;
-
         if (editingTaskId) return;
 
         const weekGridEl = (e.currentTarget as HTMLElement).closest('.task-week-grid');
@@ -149,12 +202,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         
         setTempProject(project);
 
-        // Look up the task in the latest project state to ensure we have the latest groupId.
         const task = project.tasks.find(t => t.id === taskProp.id) || taskProp;
 
-        // Prepare related tasks for group dragging
         let relatedTasks: DragState['relatedTasks'] = [];
-        
         if (task.groupId && type === 'move') {
             relatedTasks = project.tasks
                 .filter(t => t.groupId === task.groupId)
@@ -177,7 +227,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
             initialMouseX: e.clientX,
             initialMouseY: e.clientY,
             dayWidth,
-            weekHeight: weekHeight > 0 ? weekHeight : 120, // Fallback
+            weekHeight: weekHeight > 0 ? weekHeight : 120,
             taskInitialStartDate: parseISO(task.startDate),
             taskInitialEndDate: parseISO(task.endDate),
             relatedTasks
@@ -190,10 +240,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         const dx = e.clientX - dragState.initialMouseX;
         const dy = e.clientY - dragState.initialMouseY;
         
-        // Add a small threshold to detect drag vs click
         if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-        
-        // If we moved beyond threshold, consider it a drag
         ignoreClickRef.current = true;
 
         if (dragState.type === 'move') {
@@ -202,13 +249,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
             const totalDayOffset = dayOffsetHorizontal + (weekOffsetVertical * 7);
             
             const newTasks = [...tempProject.tasks];
-
-            // Apply offset to all related tasks (Group Dragging)
             dragState.relatedTasks.forEach(related => {
                 const newStart = addDays(related.initialStart, totalDayOffset);
                 const duration = differenceInDays(related.initialEnd, related.initialStart);
                 const newEnd = addDays(newStart, duration);
-
                 const index = newTasks.findIndex(t => t.id === related.id);
                 if (index !== -1) {
                     newTasks[index] = { 
@@ -218,10 +262,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
                     };
                 }
             });
-
             setTempProject({ ...tempProject, tasks: newTasks });
-
-        } else { // Resizing (Only applies to the single task dragged)
+        } else {
             const dayOffset = Math.round(dx / dragState.dayWidth);
             let newStartDate = new Date(dragState.taskInitialStartDate);
             let newEndDate = new Date(dragState.taskInitialEndDate);
@@ -229,15 +271,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
             if (dragState.type === 'resize-start') {
                  newStartDate = addDays(dragState.taskInitialStartDate, dayOffset);
                  if (newStartDate > newEndDate) newStartDate = newEndDate;
-            } else { // 'resize-end'
+            } else {
                  newEndDate = addDays(dragState.taskInitialEndDate, dayOffset);
                  if (newEndDate < newStartDate) newEndDate = newStartDate;
             }
-
             const updatedTask: Task = { ...dragState.task, startDate: newStartDate.toISOString(), endDate: newEndDate.toISOString() };
             setTempProject({ ...tempProject, tasks: tempProject.tasks.map(t => t.id === updatedTask.id ? updatedTask : t) });
         }
-
     }, [dragState, tempProject]);
 
     const handleMouseUp = useCallback(() => {
@@ -258,7 +298,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
             document.body.style.userSelect = 'auto';
             document.body.style.cursor = 'default';
         }
-
         return () => {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
@@ -270,11 +309,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
     const handleTaskClick = useCallback((taskId: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (editingTaskId) return;
-        
-        // If a drag occurred, ignore this click to prevent accidental selection toggling
-        if (ignoreClickRef.current) {
-            return;
-        }
+        if (ignoreClickRef.current) return;
 
         const newSelection = new Set(selectedTaskIds);
         if (e.ctrlKey || e.metaKey) {
@@ -286,18 +321,20 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         setSelectedTaskIds(newSelection);
     }, [selectedTaskIds, editingTaskId]);
 
-    const handleDayMouseDown = (e: React.MouseEvent) => {
+    const handleDayMouseDown = (e: React.MouseEvent, day: Date, ref: React.MutableRefObject<Date | null>) => {
         if (editingTaskId) return;
         if (!e.ctrlKey && !e.metaKey) {
             setSelectedTaskIds(new Set());
         }
+        if (!isLocked) {
+            ref.current = day;
+        }
     };
-    
+
     const handleCreateGroup = () => {
         if (isLocked) return;
         const groupName = prompt("請輸入新群組的名稱：", "新任務群組");
         if (!groupName || groupName.trim() === '') return;
-
         const selectedTasks = Array.from(selectedTaskIds)
             .map(id => project.tasks.find(t => t.id === id)!)
             .filter(Boolean)
@@ -307,30 +344,21 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
             addNotification("請至少選擇兩個任務來建立群組", "info");
             return;
         }
-
         const taskIds = selectedTasks.map(t => t.id);
         const intervals = selectedTasks.slice(0, -1).map((task, i) => 
             Math.max(0, differenceInDays(parseISO(selectedTasks[i+1].startDate), parseISO(task.endDate)))
         );
-
         const newGroupId = crypto.randomUUID();
-        
-        // Clean up old groups: remove selected tasks from them and recalculate intervals for remaining tasks
         const cleanedGroups = project.groups.map(g => {
             const remainingTaskIds = g.taskIds.filter(id => !taskIds.includes(id));
             if (remainingTaskIds.length === 0) return null;
-
             if (remainingTaskIds.length !== g.taskIds.length) {
                 const remainingTasks = remainingTaskIds
                     .map(id => project.tasks.find(t => t.id === id))
                     .filter((t): t is Task => !!t)
                     .sort((a, b) => parseISO(a.startDate).getTime() - parseISO(b.startDate).getTime());
-                
-                // Calculate new intervals only if there are 2+ tasks remaining
                 const newIntervals = remainingTasks.length > 1 
-                    ? remainingTasks.slice(0, -1).map((t, i) => 
-                        Math.max(0, differenceInDays(parseISO(remainingTasks[i+1].startDate), parseISO(t.endDate)))
-                      )
+                    ? remainingTasks.slice(0, -1).map((t, i) => Math.max(0, differenceInDays(parseISO(remainingTasks[i+1].startDate), parseISO(t.endDate))))
                     : [];
                 return { ...g, taskIds: remainingTaskIds, intervals: newIntervals };
             }
@@ -338,11 +366,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         }).filter((g): g is TaskGroup => g !== null);
 
         const newGroup = { id: newGroupId, name: groupName, taskIds, intervals };
-        
         const updatedTasks = project.tasks.map(task => 
             taskIds.includes(task.id) ? { ...task, groupId: newGroupId } : task
         );
-
         onProjectUpdate({ ...project, tasks: updatedTasks, groups: [...cleanedGroups, newGroup] });
         addNotification(`群組 "${groupName}" 已成功建立`, 'success');
         setSelectedTaskIds(new Set());
@@ -352,7 +378,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         if (isLocked) return;
         const newUnitId = e.target.value;
         if (!newUnitId) return;
-
         const updatedTasks = project.tasks.map(task =>
             selectedTaskIds.has(task.id) ? { ...task, unitId: newUnitId } : task
         );
@@ -370,13 +395,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
 
     const handleEditSave = () => {
         if (!editingTaskId) return;
-        
         const trimmedName = editingTaskName.trim();
         if (!trimmedName) {
             setEditingTaskId(null);
             return;
         }
-
         const updatedTasks = project.tasks.map(t =>
             t.id === editingTaskId ? { ...t, name: trimmedName } : t
         );
@@ -393,49 +416,68 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         }
     };
 
-    const handleTaskMouseEnter = useCallback((groupId: string | undefined) => {
-        if (groupId) setHoveredGroupId(groupId);
-    }, []);
-
-    const handleTaskMouseLeave = useCallback(() => {
-        setHoveredGroupId(null);
-    }, []);
-
     return (
         <div className="relative">
-            <h2 className="text-2xl font-bold mb-4 text-gray-700 no-print">月曆檢視</h2>
-            
-            {/* 全域固定列印頁首 */}
-            <div className="hidden print-week-header grid-cols-7">
-                {WEEK_DAYS.map(day => (
-                    <div key={day} className="text-center font-bold text-sm py-2 text-black">{day}</div>
-                ))}
-            </div>
+            <div className="bg-white shadow-lg rounded-lg overflow-hidden border-2 border-black">
+                {/* Header Row */}
+                <div className="flex border-b-2 border-black">
+                     <div className="w-20 flex-shrink-0 border-r-2 border-black bg-gray-50"></div>
+                     <div className="flex-grow grid grid-cols-7">
+                        {WEEK_DAYS.map(day => (
+                            <div key={day} className="text-center font-bold text-sm py-2 bg-gray-50 border-r-2 border-black last:border-r-0 text-gray-800">
+                                {day}
+                            </div>
+                        ))}
+                     </div>
+                </div>
 
-            <div className="space-y-8">
-                {months.map(month => (
-                    <MonthGrid
-                        key={month.toISOString()}
-                        month={month}
-                        project={displayProject}
-                        unitColorMap={unitColorMap}
-                        selectedTaskIds={selectedTaskIds}
-                        onDragToCreate={handleDragToCreate}
-                        onTaskDragStart={handleTaskDragStart}
-                        onTaskClick={handleTaskClick}
-                        onDayMouseDown={handleDayMouseDown}
-                        editingTaskId={editingTaskId}
-                        editingTaskName={editingTaskName}
-                        onEditStart={handleEditStart}
-                        onEditingTaskNameChange={setEditingTaskName}
-                        onEditSave={handleEditSave}
-                        onEditKeyDown={handleEditKeyDown}
-                        isLocked={isLocked}
-                        hoveredGroupId={hoveredGroupId}
-                        onTaskMouseEnter={handleTaskMouseEnter}
-                        onTaskMouseLeave={handleTaskMouseLeave}
-                    />
-                ))}
+                {/* Body */}
+                <div className="flex flex-col">
+                    {monthGroups.length === 0 ? (
+                        <div className="text-center py-20">
+                            <h3 className="text-xl font-semibold text-gray-700">專案沒有設定有效期間</h3>
+                            <p className="text-gray-500 mt-2">請確認專案的開始與結束日期。</p>
+                        </div>
+                    ) : (
+                        monthGroups.map((group, groupIndex) => (
+                            <div key={group.id} className={`flex ${groupIndex !== monthGroups.length - 1 ? 'border-b-2 border-black' : ''}`}>
+                                {/* Left Sidebar: Year/Month */}
+                                <div className="w-20 flex-shrink-0 border-r-2 border-black flex flex-col items-center justify-center bg-white p-2">
+                                    <span className="text-sm text-gray-500 font-medium">{group.year}</span>
+                                    <span className="text-xl font-bold text-gray-800 writing-mode-vertical">{group.month + 1}月</span>
+                                </div>
+
+                                {/* Right Side: Weeks */}
+                                <div className="flex-grow flex flex-col">
+                                    {group.weeks.map((weekStart, weekIndex) => (
+                                        <WeekRow
+                                            key={weekStart.toISOString()}
+                                            weekStart={weekStart}
+                                            tasks={filteredTasks}
+                                            unitColorMap={unitColorMap}
+                                            selectedTaskIds={selectedTaskIds}
+                                            onDragToCreate={handleDragToCreate}
+                                            onTaskDragStart={handleTaskDragStart}
+                                            onTaskClick={handleTaskClick}
+                                            onDayMouseDown={handleDayMouseDown}
+                                            editingTaskId={editingTaskId}
+                                            editingTaskName={editingTaskName}
+                                            onEditStart={handleEditStart}
+                                            onEditingTaskNameChange={setEditingTaskName}
+                                            onEditSave={handleEditSave}
+                                            onEditKeyDown={handleEditKeyDown}
+                                            isLocked={isLocked}
+                                            hoveredGroupId={hoveredGroupId}
+                                            onTaskMouseEnter={(groupId) => groupId && setHoveredGroupId(groupId)}
+                                            onTaskMouseLeave={() => setHoveredGroupId(null)}
+                                            isLastWeek={weekIndex === group.weeks.length - 1}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
 
             {!isLocked && (
@@ -476,15 +518,15 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
     );
 };
 
-interface MonthGridProps {
-    month: Date;
-    project: Project;
+interface WeekRowProps {
+    weekStart: Date;
+    tasks: Task[];
     unitColorMap: Record<string, string>;
     selectedTaskIds: Set<string>;
     onDragToCreate: (start: Date, end: Date) => void;
     onTaskDragStart: (task: Task, type: 'move' | 'resize-start' | 'resize-end', e: React.MouseEvent) => void;
     onTaskClick: (taskId: string, e: React.MouseEvent) => void;
-    onDayMouseDown: (e: React.MouseEvent) => void;
+    onDayMouseDown: (e: React.MouseEvent, day: Date, ref: React.MutableRefObject<Date | null>) => void;
     editingTaskId: string | null;
     editingTaskName: string;
     onEditStart: (task: Task) => void;
@@ -495,22 +537,19 @@ interface MonthGridProps {
     hoveredGroupId: string | null;
     onTaskMouseEnter: (groupId: string | undefined) => void;
     onTaskMouseLeave: () => void;
+    isLastWeek: boolean;
 }
 
-const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, selectedTaskIds, onDragToCreate, onTaskDragStart, onTaskClick, onDayMouseDown, editingTaskId, editingTaskName, onEditStart, onEditingTaskNameChange, onEditSave, onEditKeyDown, isLocked, hoveredGroupId, onTaskMouseEnter, onTaskMouseLeave }) => {
+const WeekRow: React.FC<WeekRowProps> = ({ weekStart, tasks, unitColorMap, selectedTaskIds, onDragToCreate, onTaskDragStart, onTaskClick, onDayMouseDown, editingTaskId, editingTaskName, onEditStart, onEditingTaskNameChange, onEditSave, onEditKeyDown, isLocked, hoveredGroupId, onTaskMouseEnter, onTaskMouseLeave, isLastWeek }) => {
     const dragStartRef = useRef<Date | null>(null);
+    
+    const weekDays = useMemo(() => {
+        // weekStart is already the start of the week from eachWeekOfInterval
+        const start = startOfWeek(weekStart, { weekStartsOn: 0 });
+        return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    }, [weekStart]);
 
-    const days = useMemo(() => {
-        const monthStart = startOfMonth(month);
-        const monthEnd = endOfMonth(month);
-        const startDate = startOfWeek(monthStart);
-        const endDate = endOfWeek(monthEnd);
-        return eachDayOfInterval({ start: startDate, end: endDate });
-    }, [month]);
-
-    const weeks = useMemo(() => {
-        return Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7));
-    }, [days]);
+    const taskLanes = useMemo(() => arrangeTasksInLanes(tasks, weekStart), [tasks, weekStart]);
 
     const handleDayMouseUp = (day: Date) => {
         if(dragStartRef.current) {
@@ -520,123 +559,111 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
     };
 
     return (
-        <div className="bg-white p-4 rounded-lg shadow print-container">
-            <h3 className="text-xl font-semibold text-center mb-4">{format(month, 'yyyy年 MMMM', { locale: zhTW })}</h3>
-            <div className="grid grid-cols-7 border-t border-l border-gray-200 no-print-local-header">
-                {WEEK_DAYS.map(day => (
-                    <div key={day} className="text-center font-medium text-sm py-2 bg-gray-50 border-r border-b border-gray-200">{day}</div>
-                ))}
-            </div>
-            <div className="border-l border-gray-200">
-                {weeks.map((week, weekIndex) => {
-                    const weekTasks = project.tasks.filter(task => {
-                        const taskStart = parseISO(task.startDate);
-                        const taskEnd = parseISO(task.endDate);
-                        const weekStart = week[0];
-                        const weekEnd = week[6];
-                        return Math.max(taskStart.getTime(), weekStart.getTime()) <= Math.min(taskEnd.getTime(), weekEnd.getTime());
-                    });
-                    
-                    const taskLanes = arrangeTasksInLanes(weekTasks);
-                    
-                    return (
-                       <div key={weekIndex} className="relative grid grid-cols-7 border-b border-gray-200 task-week-grid min-h-[140px]">
-                            {week.map((day) => (
-                                <div 
-                                    key={day.toISOString()} 
-                                    className={`relative p-2 border-r border-gray-200 ${!isSameMonth(day, month) ? 'bg-gray-50' : 'bg-white'} ${!isLocked ? 'cursor-pointer' : ''}`}
-                                    onMouseDown={(e) => { if(!isLocked) { onDayMouseDown(e); dragStartRef.current = day; } }}
-                                    onMouseUp={() => { if(!isLocked) handleDayMouseUp(day); }}
+        <div className={`relative grid grid-cols-7 border-black task-week-grid min-h-[120px] ${!isLastWeek ? 'border-b' : ''}`}>
+            {/* Day Cells */}
+            {weekDays.map((day) => (
+                <div 
+                    key={day.toISOString()} 
+                    className={`relative border-r-2 border-black flex flex-col justify-start items-start p-1 last:border-r-0 ${!isLocked ? 'cursor-pointer' : ''}`}
+                    onMouseDown={(e) => onDayMouseDown(e, day, dragStartRef)}
+                    onMouseUp={() => { if(!isLocked) handleDayMouseUp(day); }}
+                >
+                    <span className={`text-2xl font-bold z-0 ${isToday(day) ? 'text-blue-600' : 'text-gray-200'}`}>
+                        {format(day, 'd')}
+                    </span>
+                </div>
+            ))}
+
+            {/* Tasks Layer */}
+            <div className="col-start-1 col-span-7 row-start-1 grid mt-8 gap-y-1 pointer-events-none"
+                style={{
+                    gridTemplateColumns: 'repeat(7, 1fr)',
+                    gridAutoRows: 'min-content',
+                    paddingBottom: '8px'
+                }}
+            >
+                {taskLanes.map((lane, laneIndex) => (
+                    <React.Fragment key={laneIndex}>
+                        {lane.map(task => {
+                            const taskStart = parseISO(task.startDate);
+                            const taskEnd = parseISO(task.endDate);
+                            const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
+                            
+                            // Determine grid column based on week intersection
+                            const effectiveStart = taskStart < weekStart ? weekStart : taskStart;
+                            const effectiveEnd = taskEnd > weekEnd ? weekEnd : taskEnd;
+                            
+                            const startDayIndex = differenceInDays(effectiveStart, weekStart);
+                            const endDayIndex = differenceInDays(effectiveEnd, weekStart);
+                            
+                            const color = task.unitId ? unitColorMap[task.unitId] : '#a0aec0';
+                            const isSelected = selectedTaskIds.has(task.id);
+                            const isEditing = editingTaskId === task.id;
+                            const isGrouped = !!task.groupId;
+                            const isGroupHovered = hoveredGroupId && task.groupId === hoveredGroupId;
+
+                            return (
+                                <div
+                                    key={task.id}
+                                    className={`relative rounded-sm px-1.5 text-black text-sm font-medium pointer-events-auto group flex items-start py-1 transition-all duration-100 task-bar 
+                                    ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-10' : ''} 
+                                    ${isGroupHovered ? 'ring-2 ring-yellow-400 ring-offset-1 z-20 shadow-lg brightness-110' : ''} 
+                                    ${isLocked ? 'cursor-default' : ''} border border-black/20 shadow-sm leading-tight`}
+                                    onClick={(e) => onTaskClick(task.id, e)}
+                                    onMouseDown={(e) => { if (!isEditing) onTaskDragStart(task, 'move', e); }}
+                                    onDoubleClick={(e) => { e.stopPropagation(); onEditStart(task); }}
+                                    onMouseEnter={() => onTaskMouseEnter(task.groupId)}
+                                    onMouseLeave={onTaskMouseLeave}
+                                    style={{
+                                        backgroundColor: color,
+                                        gridRowStart: laneIndex + 1,
+                                        gridColumnStart: Math.max(1, startDayIndex + 1),
+                                        gridColumnEnd: Math.min(8, endDayIndex + 2),
+                                        marginLeft: '2px',
+                                        marginRight: '2px',
+                                        cursor: isLocked ? 'default' : (isEditing ? 'default' : 'move'),
+                                    }}
+                                    title={task.name}
                                 >
-                                    <span className={`absolute top-2 right-2 text-sm font-semibold ${!isSameMonth(day, month) ? 'text-gray-400' : 'text-gray-600'} ${isToday(day) ? 'bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center' : ''}`}>
-                                        {format(day, 'd')}
-                                    </span>
+                                    {isEditing ? (
+                                        <textarea
+                                            value={editingTaskName}
+                                            onChange={(e) => onEditingTaskNameChange(e.target.value)}
+                                            onBlur={onEditSave}
+                                            onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) onEditKeyDown(e); }}
+                                            autoFocus
+                                            onMouseDown={e => e.stopPropagation()}
+                                            className="w-full h-full bg-white/90 text-black text-sm px-1 rounded border-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden min-h-[20px]"
+                                            rows={Math.max(1, Math.ceil(editingTaskName.length / 10))}
+                                        />
+                                    ) : (
+                                        <>
+                                            {!isLocked && (
+                                                <div 
+                                                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-10"
+                                                    onMouseDown={(e) => onTaskDragStart(task, 'resize-start', e)}
+                                                />
+                                            )}
+                                            <div className="flex items-start w-full overflow-hidden">
+                                                {isGrouped && <LinkIcon className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0 text-black/70" />}
+                                                <p className="pointer-events-none whitespace-normal break-words w-full text-[13px] font-semibold">{task.name}</p>
+                                            </div>
+                                            {!isLocked && (
+                                                <div 
+                                                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-10"
+                                                    onMouseDown={(e) => onTaskDragStart(task, 'resize-end', e)}
+                                                />
+                                            )}
+                                        </>
+                                    )}
                                 </div>
-                            ))}
-                         
-                            <div className="col-start-1 col-span-7 row-start-1 grid mt-8 gap-y-1"
-                                style={{
-                                    gridTemplateColumns: 'repeat(7, 1fr)',
-                                    gridAutoRows: 'min-content',
-                                }}
-                            >
-                                {taskLanes.map((lane, laneIndex) => (
-                                    <React.Fragment key={laneIndex}>
-                                        {lane.map(task => {
-                                            const taskStart = parseISO(task.startDate);
-                                            const taskEnd = parseISO(task.endDate);
-                                            const startDayIndex = Math.max(0, differenceInDays(taskStart, week[0]));
-                                            const endDayIndex = Math.min(6, differenceInDays(taskEnd, week[0]));
-                                            const color = task.unitId ? unitColorMap[task.unitId] : '#a0aec0';
-
-                                            const isSelected = selectedTaskIds.has(task.id);
-                                            const isEditing = editingTaskId === task.id;
-                                            const isGrouped = !!task.groupId;
-                                            const isGroupHovered = hoveredGroupId && task.groupId === hoveredGroupId;
-
-                                            return (
-                                                <div
-                                                    key={task.id}
-                                                    className={`relative rounded px-2 text-black text-sm font-medium pointer-events-auto group flex items-start py-0.5 transition-all duration-100 task-bar ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${isGroupHovered ? 'ring-2 ring-yellow-400 ring-offset-1 z-20 shadow-lg brightness-110' : ''} ${isLocked ? 'cursor-default' : ''}`}
-                                                    onClick={(e) => onTaskClick(task.id, e)}
-                                                    onMouseDown={(e) => { if (!isEditing) onTaskDragStart(task, 'move', e); }}
-                                                    onDoubleClick={(e) => { e.stopPropagation(); onEditStart(task); }}
-                                                    onMouseEnter={() => onTaskMouseEnter(task.groupId)}
-                                                    onMouseLeave={onTaskMouseLeave}
-                                                    style={{
-                                                        backgroundColor: color,
-                                                        gridRowStart: laneIndex + 1,
-                                                        gridColumnStart: startDayIndex + 1,
-                                                        gridColumnEnd: endDayIndex + 2,
-                                                        marginLeft: '2px',
-                                                        marginRight: '2px',
-                                                        cursor: isLocked ? 'default' : (isEditing ? 'default' : 'move'),
-                                                    }}
-                                                    title={task.name}
-                                                >
-                                                    {isEditing ? (
-                                                        <input
-                                                            type="text"
-                                                            value={editingTaskName}
-                                                            onChange={(e) => onEditingTaskNameChange(e.target.value)}
-                                                            onBlur={onEditSave}
-                                                            onKeyDown={onEditKeyDown}
-                                                            autoFocus
-                                                            onMouseDown={e => e.stopPropagation()}
-                                                            className="w-full h-full bg-white/90 text-black text-sm px-1 rounded border-none focus:ring-1 focus:ring-blue-500"
-                                                        />
-                                                    ) : (
-                                                        <>
-                                                            {!isLocked && (
-                                                                <div 
-                                                                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-10"
-                                                                    onMouseDown={(e) => onTaskDragStart(task, 'resize-start', e)}
-                                                                />
-                                                            )}
-                                                            <div className="flex items-center w-full overflow-hidden">
-                                                                {isGrouped && <LinkIcon className="w-3 h-3 mr-1 flex-shrink-0 text-black/80" />}
-                                                                <p className="pointer-events-none whitespace-normal break-words w-full truncate">{task.name}</p>
-                                                            </div>
-                                                            {!isLocked && (
-                                                                <div 
-                                                                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-10"
-                                                                    onMouseDown={(e) => onTaskDragStart(task, 'resize-end', e)}
-                                                                />
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </React.Fragment>
-                                ))}
-                            </div>
-                       </div>
-                    );
-                })}
+                            );
+                        })}
+                    </React.Fragment>
+                ))}
             </div>
         </div>
     );
-}
+};
 
 export default CalendarView;

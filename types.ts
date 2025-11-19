@@ -32,3 +32,8 @@ export interface Project {
 }
 
 export type ViewMode = 'calendar' | 'group';
+
+export type FilterType = {
+    type: 'unit' | 'group' | 'all';
+    value: string | null;
+};
