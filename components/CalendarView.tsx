@@ -5,7 +5,7 @@ import { addDays, differenceInDays, endOfWeek, eachWeekOfInterval, format, isTod
 import { PlusIcon, GroupIcon, XIcon, LinkIcon } from './ui/Icons';
 import Button from './ui/Button';
 import AddTaskModal from './modals/AddTaskModal';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useNotifications } from '../hooks/useNotifications';
 
 interface CalendarViewProps {
     project: Project;
