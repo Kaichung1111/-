@@ -540,21 +540,21 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
                     const taskLanes = arrangeTasksInLanes(weekTasks);
                     
                     return (
-                       <div key={weekIndex} className="relative grid grid-cols-7 border-b border-gray-200 task-week-grid">
+                       <div key={weekIndex} className="relative grid grid-cols-7 border-b border-gray-200 task-week-grid min-h-[140px]">
                             {week.map((day) => (
                                 <div 
                                     key={day.toISOString()} 
-                                    className={`relative p-1 border-r border-gray-200 ${!isSameMonth(day, month) ? 'bg-gray-50' : 'bg-white'} ${!isLocked ? 'cursor-pointer' : ''}`}
+                                    className={`relative p-2 border-r border-gray-200 ${!isSameMonth(day, month) ? 'bg-gray-50' : 'bg-white'} ${!isLocked ? 'cursor-pointer' : ''}`}
                                     onMouseDown={(e) => { if(!isLocked) { onDayMouseDown(e); dragStartRef.current = day; } }}
                                     onMouseUp={() => { if(!isLocked) handleDayMouseUp(day); }}
                                 >
-                                    <span className={`absolute top-1 right-1 text-xs font-semibold ${!isSameMonth(day, month) ? 'text-gray-400' : 'text-gray-600'} ${isToday(day) ? 'bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center' : ''}`}>
+                                    <span className={`absolute top-2 right-2 text-sm font-semibold ${!isSameMonth(day, month) ? 'text-gray-400' : 'text-gray-600'} ${isToday(day) ? 'bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center' : ''}`}>
                                         {format(day, 'd')}
                                     </span>
                                 </div>
                             ))}
                          
-                            <div className="col-start-1 col-span-7 row-start-1 grid mt-7 gap-y-1"
+                            <div className="col-start-1 col-span-7 row-start-1 grid mt-8 gap-y-1"
                                 style={{
                                     gridTemplateColumns: 'repeat(7, 1fr)',
                                     gridAutoRows: 'min-content',
