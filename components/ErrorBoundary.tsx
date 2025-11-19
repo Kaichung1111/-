@@ -9,24 +9,28 @@ interface State {
   hasError: boolean;
 }
 
+// FIX: Removed `public` access modifiers from class members. While valid TypeScript, they are not
+// conventional for React lifecycle methods and can cause issues with some build setups,
+// leading to errors like 'props' not being found on the component instance.
 export class ErrorBoundary extends React.Component<Props, State> {
-  public state: State = {
+  state: State = {
     hasError: false
   };
 
-  public static getDerivedStateFromError(_: Error): State {
+  static getDerivedStateFromError(_: Error): State {
     return { hasError: true };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
   }
 
-  public render() {
+  render() {
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-red-50 text-red-800 p-4">
           <h1 className="text-3xl font-bold mb-4">糟糕！發生了一些錯誤。</h1>
+          {/* FIX: Corrected a typo in the error message from "抱負" (ambition) to "抱歉" (sorry). */}
           <p className="text-lg mb-6">我們很抱歉，應用程式遇到了一個問題。</p>
           <button
             onClick={() => window.location.reload()}

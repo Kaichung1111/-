@@ -405,9 +405,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ project, onProjectUpdate, i
         <div className="relative">
             <h2 className="text-2xl font-bold mb-4 text-gray-700 no-print">月曆檢視</h2>
             
+            {/* 全域固定列印頁首 */}
             <div className="hidden print-week-header grid-cols-7">
                 {WEEK_DAYS.map(day => (
-                    <div key={day} className="text-center font-bold text-sm py-2 text-black border-b-2 border-black">{day}</div>
+                    <div key={day} className="text-center font-bold text-sm py-2 text-black">{day}</div>
                 ))}
             </div>
 
@@ -576,7 +577,7 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
                                             return (
                                                 <div
                                                     key={task.id}
-                                                    className={`relative rounded px-2 text-white text-sm font-medium pointer-events-auto group flex items-start py-0.5 transition-all duration-100 task-bar ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${isGroupHovered ? 'ring-2 ring-yellow-400 ring-offset-1 z-20 shadow-lg brightness-110' : ''} ${isLocked ? 'cursor-default' : ''}`}
+                                                    className={`relative rounded px-2 text-black text-sm font-medium pointer-events-auto group flex items-start py-0.5 transition-all duration-100 task-bar ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${isGroupHovered ? 'ring-2 ring-yellow-400 ring-offset-1 z-20 shadow-lg brightness-110' : ''} ${isLocked ? 'cursor-default' : ''}`}
                                                     onClick={(e) => onTaskClick(task.id, e)}
                                                     onMouseDown={(e) => { if (!isEditing) onTaskDragStart(task, 'move', e); }}
                                                     onDoubleClick={(e) => { e.stopPropagation(); onEditStart(task); }}
@@ -613,7 +614,7 @@ const MonthGrid: React.FC<MonthGridProps> = ({ month, project, unitColorMap, sel
                                                                 />
                                                             )}
                                                             <div className="flex items-center w-full overflow-hidden">
-                                                                {isGrouped && <LinkIcon className="w-3 h-3 mr-1 flex-shrink-0 text-white/80" />}
+                                                                {isGrouped && <LinkIcon className="w-3 h-3 mr-1 flex-shrink-0 text-black/80" />}
                                                                 <p className="pointer-events-none whitespace-normal break-words w-full truncate">{task.name}</p>
                                                             </div>
                                                             {!isLocked && (

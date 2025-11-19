@@ -26,45 +26,40 @@
       @media print {
         @page {
           size: A4 landscape;
-          margin: 8mm;
+          margin: 10mm;
         }
 
         body {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
           background-color: #fff !important;
-          /* Auto-fit scale: slightly shrink content to ensure it fits width comfortably */
-          zoom: 0.9; 
         }
 
-        /* Hide elements not meant for printing. The 'no-print' class is added to them. */
+        /* 隱藏所有非列印元素 */
         .no-print, header {
           display: none !important;
         }
 
-        /* Reset layout to allow content to expand for printing */
+        /* 重設版面配置以允許內容擴展 */
         #root, #root > div, .h-screen {
             height: auto !important;
             min-height: initial !important;
             overflow: visible !important;
         }
         
-        /* Global Fixed Header for Print (appears on every page) */
+        /* 全域固定列印頁首 (每頁都會出現) */
         .print-week-header {
             display: grid !important;
             position: fixed;
             top: 0;
-            left: 0;
-            right: 0;
+            left: 10mm; /* 與頁面邊界對齊 */
+            right: 10mm;
             background-color: white;
             z-index: 9999;
             border-bottom: 2px solid #000;
-            margin-bottom: 10px;
-            padding-left: 1rem; /* Match MonthGrid padding */
-            padding-right: 1rem;
         }
 
-        /* Hide the local headers inside the months during print to avoid duplication/clutter */
+        /* 隱藏月份內原本的星期標題，避免重複 */
         .no-print-local-header {
             display: none !important;
         }
@@ -73,38 +68,36 @@
           padding: 0 !important;
           overflow: visible !important;
           height: auto !important;
-          margin-top: 40px !important; /* Add space for the fixed header */
+          margin-top: 40px !important; /* 為固定頁首保留空間 */
         }
 
-        /* Optimize Month Container */
+        /* 優化月份容器 */
         .print-container {
           box-shadow: none !important;
-          border: none !important; /* Remove border to save space */
-          page-break-inside: auto;
+          border: none !important;
           padding-top: 0 !important;
         }
 
-        /* Ensure tasks are readable */
-        .text-white {
+        /* 確保任務文字可讀 */
+        .text-black {
             color: black !important;
             text-shadow: none !important;
         }
         
-        /* Improve task visibility contrast in print */
+        /* 提升任務在列印時的對比度 */
         .task-bar {
             border: 1px solid #ccc;
         }
 
-        /* Ensure week rows have a minimum height and don't break mid-row */
+        /* 確保週的內容不會被跨頁切割 */
         .task-week-grid {
-            min-height: 60px;
             break-inside: avoid;
             page-break-inside: avoid;
             border-bottom: 1px solid #eee;
         }
 
-        /* Remove selection highlight which is irrelevant for print */
-        .ring-2 {
+        /* 移除選取狀態的外框 */
+        .ring-2, .ring-yellow-400 {
             --tw-ring-shadow: 0 0 #0000 !important;
             box-shadow: none !important;
         }

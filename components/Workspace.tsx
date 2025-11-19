@@ -113,7 +113,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         };
     
         let importedCount = 0;
-        // Fix: Explicitly type file as File to avoid 'unknown' type errors
+        // FIX: Explicitly type the 'file' parameter as 'File' to prevent TypeScript
+        // from inferring it as 'unknown', which would cause an error when accessing 'file.name'.
         const filePromises = Array.from(files).map((file: File) => {
             return new Promise<void>((resolve, reject) => {
                  if (file.name.endsWith('.md')) {
