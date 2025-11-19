@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Project, ViewMode, Task } from '../types';
 import { useProjects } from '../hooks/useProjects';
-import { ArrowLeftIcon, CogIcon, DownloadIcon, PrinterIcon, UploadIcon, PlusIcon, CalendarIcon, GroupIcon, DocumentDuplicateIcon } from './ui/Icons';
+import { ArrowLeftIcon, CogIcon, DownloadIcon, PrinterIcon, UploadIcon, CalendarIcon, GroupIcon, LockClosedIcon, LockOpenIcon } from './ui/Icons';
 import CalendarView from './CalendarView';
 import GroupRelationshipView from './GroupRelationshipView';
 import Button from './ui/Button';
@@ -17,11 +18,12 @@ interface WorkspaceProps {
 }
 
 const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
-    const { getProject, updateProject, addProjectFromTemplate } = useProjects();
+    const { getProject, updateProject } = useProjects();
     const [project, setProject] = useState<Project | null>(null);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<ViewMode>('calendar');
     const [isUnitsModalOpen, setIsUnitsModalOpen] = useState(false);
+    const [isLocked, setIsLocked] = useState(false);
     const { addNotification } = useNotifications();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -56,10 +58,15 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
     };
 
     const handleImportMDClick = () => {
+        if (isLocked) {
+            addNotification('專案已鎖定，無法匯入', 'info');
+            return;
+        }
         fileInputRef.current?.click();
     };
 
     const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (isLocked) return;
         const files = event.target.files;
         if (!files || !project) return;
     
@@ -106,13 +113,14 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         };
     
         let importedCount = 0;
-        const filePromises = Array.from(files).map(file => {
+        // Fix: Explicitly type file as File to avoid 'unknown' type errors
+        const filePromises = Array.from(files).map((file: File) => {
             return new Promise<void>((resolve, reject) => {
                  if (file.name.endsWith('.md')) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
-                        const content = e.target?.result as string;
-                        if (content) {
+                        const content = e.target?.result;
+                        if (typeof content === 'string') {
                             const parsedTask = parseMD(content, file.name);
                             if (parsedTask) {
                                 newTasks.push({ ...parsedTask, id: crypto.randomUUID() });
@@ -148,15 +156,9 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
         }
     };
     
-    const handleSaveAsTemplate = async () => {
-        if (!project) return;
-        try {
-            await addProjectFromTemplate(project);
-            addNotification(`已成功將 "${project.name}" 另存為範本`, 'success');
-        } catch (error) {
-            console.error('Failed to save as template:', error);
-            addNotification('另存為範本失敗', 'error');
-        }
+    const toggleLock = () => {
+        setIsLocked(!isLocked);
+        addNotification(isLocked ? '已解除編輯鎖定' : '已鎖定專案，禁止編輯', 'info');
     };
 
     if (loading) {
@@ -192,12 +194,38 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
                      <SegmentedControl options={viewOptions} value={viewMode} onChange={(val) => setViewMode(val as ViewMode)} />
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button onClick={handleSaveAsTemplate} variant="secondary" size="sm"><DocumentDuplicateIcon className="w-5 h-5 mr-2" />另存為範本</Button>
-                    <Button onClick={() => setIsUnitsModalOpen(true)} variant="secondary" size="sm"><CogIcon className="w-5 h-5 mr-2" />管理單位</Button>
-                    <Button onClick={handleExportSchedule} variant="secondary" size="sm"><DownloadIcon className="w-5 h-5 mr-2" />匯出排程</Button>
-                    <Button onClick={() => window.print()} variant="secondary" size="sm"><PrinterIcon className="w-5 h-5 mr-2" />列印功能</Button>
-                    <input type="file" ref={fileInputRef} onChange={handleFileImport} multiple accept=".md" className="hidden" />
-                    <Button onClick={handleImportMDClick} variant="secondary" size="sm"><UploadIcon className="w-5 h-5 mr-2" />匯入MD</Button>
+                    <Button 
+                        onClick={toggleLock} 
+                        variant={isLocked ? "danger" : "secondary"} 
+                        size="sm"
+                        title={isLocked ? "點擊解鎖" : "點擊鎖定"}
+                        className={isLocked ? "ring-2 ring-red-300" : ""}
+                    >
+                        {isLocked ? <LockClosedIcon className="w-5 h-5 mr-2" /> : <LockOpenIcon className="w-5 h-5 mr-2" />}
+                        {isLocked ? "已鎖定" : "編輯中"}
+                    </Button>
+                    <div className="w-px h-6 bg-gray-300 mx-1"></div>
+                    
+                    <Button onClick={() => !isLocked && setIsUnitsModalOpen(true)} variant="secondary" size="sm" disabled={isLocked}>
+                        <CogIcon className="w-5 h-5 mr-2" />
+                        管理單位
+                    </Button>
+                    
+                    <Button onClick={handleExportSchedule} variant="secondary" size="sm">
+                        <UploadIcon className="w-5 h-5 mr-2" />
+                        匯出排程
+                    </Button>
+                    
+                    <input type="file" ref={fileInputRef} onChange={handleFileImport} multiple accept=".md" className="hidden" disabled={isLocked} />
+                    <Button onClick={handleImportMDClick} variant="secondary" size="sm" disabled={isLocked}>
+                        <DownloadIcon className="w-5 h-5 mr-2" />
+                        匯入MD
+                    </Button>
+                    
+                    <Button onClick={() => window.print()} variant="secondary" size="sm">
+                        <PrinterIcon className="w-5 h-5 mr-2" />
+                        列印功能
+                    </Button>
                 </div>
             </header>
 
@@ -210,13 +238,13 @@ const Workspace: React.FC<WorkspaceProps> = ({ projectId, onExit }) => {
                     </div>
                 ) : (
                     <>
-                        {viewMode === 'calendar' && <CalendarView project={project} onProjectUpdate={handleProjectUpdate} />}
-                        {viewMode === 'group' && <GroupRelationshipView project={project} onProjectUpdate={handleProjectUpdate} />}
+                        {viewMode === 'calendar' && <CalendarView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} />}
+                        {viewMode === 'group' && <GroupRelationshipView project={project} onProjectUpdate={handleProjectUpdate} isLocked={isLocked} />}
                     </>
                 )}
             </main>
 
-            {isUnitsModalOpen && (
+            {isUnitsModalOpen && !isLocked && (
                 <ManageUnitsModal
                     project={project}
                     onProjectUpdate={handleProjectUpdate}

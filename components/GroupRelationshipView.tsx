@@ -1,24 +1,58 @@
 
 import React from 'react';
 import { Project, Task, TaskGroup } from '../types';
-import { parseISO, format } from 'date-fns';
+import { parseISO, format, differenceInDays } from 'date-fns';
 import { TrashIcon, EditIcon } from './ui/Icons';
 import Button from './ui/Button';
 
 interface GroupRelationshipViewProps {
     project: Project;
     onProjectUpdate: (updatedProject: Project) => void;
+    isLocked: boolean;
 }
 
-const GroupRelationshipView: React.FC<GroupRelationshipViewProps> = ({ project, onProjectUpdate }) => {
+const GroupRelationshipView: React.FC<GroupRelationshipViewProps> = ({ project, onProjectUpdate, isLocked }) => {
     
     const taskMap = new Map(project.tasks.map(task => [task.id, task]));
 
     const handleDeleteGroup = (groupId: string) => {
+        if (isLocked) return;
         const updatedGroups = project.groups.filter(g => g.id !== groupId);
         const updatedTasks = project.tasks.map(task => 
             task.groupId === groupId ? { ...task, groupId: undefined } : task
         );
+        onProjectUpdate({ ...project, groups: updatedGroups, tasks: updatedTasks });
+    };
+
+    const handleUnlinkTask = (taskId: string, groupId: string) => {
+        if (isLocked) return;
+        
+        const group = project.groups.find(g => g.id === groupId);
+        if (!group) return;
+
+        const remainingTaskIds = group.taskIds.filter(id => id !== taskId);
+        let updatedGroups: TaskGroup[];
+
+        if (remainingTaskIds.length === 0) {
+            updatedGroups = project.groups.filter(g => g.id !== groupId);
+        } else {
+             const remainingTasks = remainingTaskIds
+                .map(id => taskMap.get(id))
+                .filter((t): t is Task => !!t)
+                .sort((a, b) => parseISO(a.startDate).getTime() - parseISO(b.startDate).getTime());
+             
+             const newIntervals = remainingTasks.slice(0, -1).map((t, i) => 
+                Math.max(0, differenceInDays(parseISO(remainingTasks[i+1].startDate), parseISO(t.endDate)))
+             );
+
+             const updatedGroup = { ...group, taskIds: remainingTaskIds, intervals: newIntervals };
+             updatedGroups = project.groups.map(g => g.id === groupId ? updatedGroup : g);
+        }
+
+        const updatedTasks = project.tasks.map(t => 
+            t.id === taskId ? { ...t, groupId: undefined } : t
+        );
+        
         onProjectUpdate({ ...project, groups: updatedGroups, tasks: updatedTasks });
     };
 
@@ -33,7 +67,14 @@ const GroupRelationshipView: React.FC<GroupRelationshipViewProps> = ({ project, 
             ) : (
                 <div className="space-y-6">
                     {project.groups.map(group => (
-                        <GroupCard key={group.id} group={group} allTasks={taskMap} onDelete={() => handleDeleteGroup(group.id)} />
+                        <GroupCard 
+                            key={group.id} 
+                            group={group} 
+                            allTasks={taskMap} 
+                            onDelete={() => handleDeleteGroup(group.id)} 
+                            onUnlink={(taskId) => handleUnlinkTask(taskId, group.id)}
+                            isLocked={isLocked} 
+                        />
                     ))}
                 </div>
             )}
@@ -45,14 +86,16 @@ interface GroupCardProps {
     group: TaskGroup;
     allTasks: Map<string, Task>;
     onDelete: () => void;
+    onUnlink: (taskId: string) => void;
+    isLocked: boolean;
 }
 
-const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete }) => {
+const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete, onUnlink, isLocked }) => {
     const groupTasks = group.taskIds.map(id => allTasks.get(id)).filter((t): t is Task => !!t);
 
     if (groupTasks.length === 0) return null;
     
-    const color = groupTasks[0].unitId ? project.units.find(u => u.id === groupTasks[0].unitId)?.color : '#9ca3af';
+    const color = '#3b82f6'; 
 
     return (
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
@@ -60,11 +103,13 @@ const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete }) => {
                 <div className="flex justify-between items-center mb-4">
                     <div className="flex items-center gap-2">
                         <h3 className="text-lg font-bold">{group.name}</h3>
-                        <Button variant="icon" size="sm"><EditIcon className="w-4 h-4 text-gray-500" /></Button>
+                        {!isLocked && <Button variant="icon" size="sm"><EditIcon className="w-4 h-4 text-gray-500" /></Button>}
                     </div>
-                    <Button onClick={onDelete} variant="icon" title="刪除群組">
-                        <TrashIcon className="w-5 h-5 text-gray-500 hover:text-red-500"/>
-                    </Button>
+                    {!isLocked && (
+                        <Button onClick={onDelete} variant="icon" title="刪除群組">
+                            <TrashIcon className="w-5 h-5 text-gray-500 hover:text-red-500"/>
+                        </Button>
+                    )}
                 </div>
                 <div className="space-y-2">
                     {groupTasks.map((task, index) => (
@@ -77,7 +122,7 @@ const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete }) => {
                                         {format(parseISO(task.startDate), 'yyyy/MM/dd')} - {format(parseISO(task.endDate), 'yyyy/MM/dd')}
                                     </p>
                                 </div>
-                                <Button variant="ghost" size="sm">解除關聯</Button>
+                                {!isLocked && <Button onClick={() => onUnlink(task.id)} variant="ghost" size="sm">解除關聯</Button>}
                             </div>
                             {index < groupTasks.length - 1 && (
                                 <div className="flex items-center my-1 ml-3.5">
@@ -94,8 +139,5 @@ const GroupCard: React.FC<GroupCardProps> = ({ group, allTasks, onDelete }) => {
         </div>
     )
 }
-// Dummy project data for GroupCard to compile, it will be passed from the parent.
-const project: Project = { id: '', name: '', startDate: '', endDate: '', tasks: [], units: [], groups: [] };
-
 
 export default GroupRelationshipView;
